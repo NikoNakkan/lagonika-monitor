@@ -2,7 +2,8 @@ name: Lagonika monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Offset from :00 because GitHub delays or drops runs at the top of the hour.
+    - cron: "3-58/5 * * * *"
   workflow_dispatch:
 
 permissions:
