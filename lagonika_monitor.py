@@ -10,6 +10,7 @@ import os
 import re
 import smtplib
 import sys
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
@@ -85,7 +86,7 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def fetch_page(url: str, timeout: int = 30) -> str:
+def fetch_page(url: str, timeout: int = 20, attempts: int = 3) -> str:
     request = Request(
         url,
         headers={
@@ -94,8 +95,16 @@ def fetch_page(url: str, timeout: int = 30) -> str:
             "Accept": "text/html,application/xhtml+xml,application/xml",
         },
     )
-    with urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="ignore")
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return response.read().decode("utf-8", errors="ignore")
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            if attempt == attempts:
+                raise
+            print(f"Fetch {url} failed ({exc}), retry {attempt}/{attempts - 1}", file=sys.stderr)
+            time.sleep(5 * attempt)
+    raise AssertionError("unreachable")
 
 
 def html_to_text(raw: str, limit: int = 400) -> str:
@@ -293,7 +302,12 @@ def email_deal(deal: Deal, to_email: str, *, test: bool = False) -> None:
 
 
 def run_check(*, to_email: str, keywords: list[str], dry_run: bool) -> int:
-    deals = fetch_deals()
+    try:
+        deals = fetch_deals()
+    except (HTTPError, URLError, TimeoutError, OSError, ET.ParseError) as exc:
+        # Lagonika is occasionally unreachable; skip quietly, the next run catches up.
+        print(f"Could not reach lagonika.gr ({exc}); will try again next run.")
+        return 0
     print(f"Fetched {len(deals)} deals")
     state = load_state()
     seen = set(state.get("ids", []))
